@@ -1,0 +1,6 @@
+*.o
+tmux
+.deps
+Makefile
+config.log
+config.status

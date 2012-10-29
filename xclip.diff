@@ -1,0 +1,221 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..4e08efb
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,6 @@
++*.o
++tmux
++.deps
++Makefile
++config.log
++config.status
+diff --git a/job.c b/job.c
+index 3b8d6e3..0a3dff7 100644
+--- a/job.c
++++ b/job.c
+@@ -37,6 +37,81 @@ struct joblist	all_jobs = LIST_HEAD_INITIALIZER(all_jobs);
+ 
+ /* Start a job running, if it isn't already. */
+ struct job *
++job_run_with_writecb(const char *cmd,
++    void (*callbackfn)(struct job *),
++    void (*writecallbackfn)(struct bufferevent *bufev, void *data),
++    void (*freefn)(void *), void *data)
++{
++	struct job	*job;
++	struct environ	 env;
++	pid_t		 pid;
++	int		 nullfd, out[2];
++
++	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, out) != 0)
++		return (NULL);
++
++	environ_init(&env);
++	environ_copy(&global_environ, &env);
++	server_fill_environ(NULL, &env);
++
++	switch (pid = fork()) {
++	case -1:
++		environ_free(&env);
++		return (NULL);
++	case 0:		/* child */
++		clear_signals(1);
++
++		environ_push(&env);
++		environ_free(&env);
++
++		if (dup2(out[0], STDIN_FILENO) == -1)
++			fatal("dup2 failed");
++		if (out[0] != STDIN_FILENO)
++			close(out[0]);
++		close(out[1]);
++
++		nullfd = open(_PATH_DEVNULL, O_RDWR, 0);
++		if (nullfd < 0)
++			fatal("open failed");
++		if (dup2(nullfd, STDOUT_FILENO) == -1)
++			fatal("dup2 failed");
++		if (dup2(nullfd, STDERR_FILENO) == -1)
++			fatal("dup2 failed");
++		if (nullfd != STDOUT_FILENO && nullfd != STDERR_FILENO)
++			close(nullfd);
++
++		closefrom(STDERR_FILENO + 1);
++
++		execl(_PATH_BSHELL, "sh", "-c", cmd, (char *) NULL);
++		fatal("execl failed");
++	}
++
++	/* parent */
++	environ_free(&env);
++	close(out[0]);
++
++	job = xmalloc(sizeof *job);
++	job->cmd = xstrdup(cmd);
++	job->pid = pid;
++	job->status = 0;
++
++	LIST_INSERT_HEAD(&all_jobs, job, lentry);
++
++	job->callbackfn = callbackfn;
++	job->freefn = freefn;
++	job->data = data;
++
++	job->fd = out[1];
++	setblocking(job->fd, 0);
++
++	job->event = bufferevent_new(job->fd, NULL, writecallbackfn, job_callback, job);
++	bufferevent_enable(job->event, EV_WRITE);
++
++	log_debug("run job %p: %s, pid %ld", job, job->cmd, (long) job->pid);
++	return (job);
++}
++
++struct job *
+ job_run(const char *cmd,
+     void (*callbackfn)(struct job *), void (*freefn)(void *), void *data)
+ {
+diff --git a/mode-key.c b/mode-key.c
+index 27ff9ff..fc88bad 100644
+--- a/mode-key.c
++++ b/mode-key.c
+@@ -92,6 +92,7 @@ const struct mode_key_cmdstr mode_key_cmdstr_copy[] = {
+ 	{ MODEKEYCOPY_COPYLINE, "copy-line" },
+ 	{ MODEKEYCOPY_COPYENDOFLINE, "copy-end-of-line" },
+ 	{ MODEKEYCOPY_COPYSELECTION, "copy-selection" },
++	{ MODEKEYCOPY_COPYSELECTIONXCLIP, "copy-selection-xclip" },
+ 	{ MODEKEYCOPY_DOWN, "cursor-down" },
+ 	{ MODEKEYCOPY_ENDOFLINE, "end-of-line" },
+ 	{ MODEKEYCOPY_GOTOLINE, "goto-line" },
+diff --git a/tmux.h b/tmux.h
+index 1dab6c6..ac57af3 100644
+--- a/tmux.h
++++ b/tmux.h
+@@ -473,6 +473,7 @@ enum mode_key_cmd {
+ 	MODEKEYCOPY_COPYLINE,
+ 	MODEKEYCOPY_COPYENDOFLINE,
+ 	MODEKEYCOPY_COPYSELECTION,
++	MODEKEYCOPY_COPYSELECTIONXCLIP,
+ 	MODEKEYCOPY_DOWN,
+ 	MODEKEYCOPY_ENDOFLINE,
+ 	MODEKEYCOPY_GOTOLINE,
+@@ -1416,6 +1417,11 @@ const char *options_table_print_entry(
+ extern struct joblist all_jobs;
+ struct job *job_run(
+ 	    const char *, void (*)(struct job *), void (*)(void *), void *);
++struct job *
++job_run_with_writecb(const char *cmd,
++	    void (*callbackfn)(struct job *),
++	    void (*writecallbackfn)(struct bufferevent *bufev, void *data),
++	    void (*freefn)(void *), void *data);
+ void	job_free(struct job *);
+ void	job_died(struct job *, int);
+ 
+diff --git a/window-copy.c b/window-copy.c
+index 4f25f3f..9b42e29 100644
+--- a/window-copy.c
++++ b/window-copy.c
+@@ -20,6 +20,7 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ #include "tmux.h"
+ 
+@@ -53,6 +54,7 @@ void	window_copy_update_cursor(struct window_pane *, u_int, u_int);
+ void	window_copy_start_selection(struct window_pane *);
+ int	window_copy_update_selection(struct window_pane *);
+ void	window_copy_copy_selection(struct window_pane *, int);
++void	window_copy_copy_selection_xclip(struct window_pane *, int);
+ void	window_copy_clear_selection(struct window_pane *);
+ void	window_copy_copy_line(
+ 	    struct window_pane *, char **, size_t *, u_int, u_int, u_int);
+@@ -541,6 +543,13 @@ window_copy_key(struct window_pane *wp, struct session *sess, int key)
+ 			return;
+ 		}
+ 		break;
++	case MODEKEYCOPY_COPYSELECTIONXCLIP:
++		if (sess != NULL) {
++			window_copy_copy_selection_xclip(wp, data->numprefix);
++			window_pane_reset_mode(wp);
++			return;
++		}
++		break;
+ 	case MODEKEYCOPY_STARTOFLINE:
+ 		window_copy_cursor_start_of_line(wp);
+ 		break;
+@@ -1395,6 +1404,52 @@ window_copy_copy_selection(struct window_pane *wp, int idx)
+ }
+ 
+ void
++window_copy_copy_selection_xclip_callback(struct bufferevent *bufev, void *data)
++{
++	struct job * job = data;
++	struct paste_buffer *pbl = job->data;
++	int ret;
++
++	if (pbl->size <= 0) {
++		goto end;
++	}
++
++	if ((ret = write(job->fd, pbl->data, pbl->size)) == -1) {
++		return ;
++	}
++	pbl->size -= ret;
++	if (pbl->size <= 0)
++		goto end;
++	memmove(pbl->data, pbl->data + ret, pbl->size);
++	job->data = pbl;
++	return;
++
++ end:
++	close(job->fd);
++	xfree(pbl->data);
++	xfree(pbl);
++}
++
++void
++window_copy_copy_selection_xclip(struct window_pane *wp, int idx)
++{
++	struct paste_buffer * pb = xmalloc(sizeof *pb), *pbt;
++
++	window_copy_copy_selection(wp, idx);
++
++	pbt = paste_get_top(&global_buffers);
++
++	pb->data = xmalloc(sizeof(char)*(pbt->size));
++	memcpy(pb->data, pbt->data, pbt->size);
++	pb->size = pbt->size;
++
++	job_run_with_writecb("xclip -selection clipboard", NULL,
++		window_copy_copy_selection_xclip_callback, NULL, 
++		pb);
++}
++
++
++void
+ window_copy_copy_line(struct window_pane *wp,
+     char **buf, size_t *off, u_int sy, u_int sx, u_int ex)
+ {
