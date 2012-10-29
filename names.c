@@ -60,16 +60,7 @@ window_name_callback(unused int fd, unused short events, void *data)
 	if (name == NULL)
 		wname = default_window_name(w);
 	else {
-		/*
-		 * If tmux is using the default command, it will be a login
-		 * shell and argv[0] may have a - prefix. Remove this if it is
-		 * present. Ick.
-		 */
-		if (w->active->cmd != NULL && *w->active->cmd == '\0' &&
-		    name != NULL && name[0] == '-' && name[1] != '\0')
-			wname = parse_window_name(name + 1);
-		else
-				wname = parse_window_name(name);
+		wname = compose_window_name(w);
 		xfree(name);
 	}
 
@@ -103,12 +94,14 @@ compose_window_name(struct window *w)
 {
 	struct window_pane	*wp;
 	char result[256] = "";
-	char *part, *return_value;
+	char *part, *return_value, *os;
 	u_int			 n;
 
-	n = options_get_number(&w->options, "pane-base-index");
+	n = 0;
 	TAILQ_FOREACH(wp, &w->panes, entry) {
-		if (w->active->cmd != NULL && *w->active->cmd != '\0')
+		if (os = osdep_get_name(wp->fd, wp->tty))
+			part = parse_window_name(os);
+		else if (wp->cmd != NULL && *wp->cmd != '\0')
 			part = parse_window_name(wp->cmd);
 		else
 			part = parse_window_name(wp->shell);
@@ -118,7 +111,7 @@ compose_window_name(struct window *w)
 		n++;
 	}
 	// remove last |
-	// result[strlen(result)-1] = '\0';
+	result[strlen(result)-1] = '\0';
 	return_value = xstrdup(result);
 	return (return_value);
 }
@@ -146,7 +139,7 @@ parse_window_name(const char *in)
 	if (*name == '/')
 		name = basename(name);
 	if (strcmp(name, "bash") == 0)
-		strcpy(name, "**");
+		strcpy(name, "--");
 	name = xstrdup(name);
 	xfree(copy);
 	return (name);
