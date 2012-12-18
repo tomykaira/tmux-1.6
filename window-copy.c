@@ -50,6 +50,7 @@ int	window_copy_search_rl(
 void	window_copy_search_up(struct window_pane *, const char *);
 void	window_copy_search_down(struct window_pane *, const char *);
 void	window_copy_goto_line(struct window_pane *, const char *);
+void	window_copy_whole_line(struct window_pane *, const char *);
 void	window_copy_update_cursor(struct window_pane *, u_int, u_int);
 void	window_copy_start_selection(struct window_pane *);
 int	window_copy_update_selection(struct window_pane *);
@@ -97,6 +98,7 @@ enum window_copy_input_type {
 	WINDOW_COPY_JUMPTOFORWARD,
 	WINDOW_COPY_JUMPTOBACK,
 	WINDOW_COPY_GOTOLINE,
+	WINDOW_COPY_WHOLELINE,
 };
 
 /*
@@ -656,6 +658,7 @@ window_copy_key(struct window_pane *wp, struct session *sess, int key)
 		switch (data->searchtype) {
 		case WINDOW_COPY_OFF:
 		case WINDOW_COPY_GOTOLINE:
+		case WINDOW_COPY_WHOLELINE:
 		case WINDOW_COPY_JUMPFORWARD:
 		case WINDOW_COPY_JUMPBACK:
 		case WINDOW_COPY_JUMPTOFORWARD:
@@ -693,6 +696,11 @@ window_copy_key(struct window_pane *wp, struct session *sess, int key)
 	case MODEKEYCOPY_GOTOLINE:
 		data->inputtype = WINDOW_COPY_GOTOLINE;
 		data->inputprompt = "Goto Line";
+		*data->inputstr = '\0';
+		goto input_on;
+	case MODEKEYCOPY_WHOLELINE:
+		data->inputtype = WINDOW_COPY_WHOLELINE;
+		data->inputprompt = "Copy Line";
 		*data->inputstr = '\0';
 		goto input_on;
 	case MODEKEYCOPY_STARTNUMBERPREFIX:
@@ -784,6 +792,10 @@ window_copy_key_input(struct window_pane *wp, int key)
 			break;
 		case WINDOW_COPY_GOTOLINE:
 			window_copy_goto_line(wp, data->inputstr);
+			*data->inputstr = '\0';
+			break;
+		case WINDOW_COPY_WHOLELINE:
+			window_copy_whole_line(wp, data->inputstr);
 			*data->inputstr = '\0';
 			break;
 		}
@@ -1110,6 +1122,22 @@ window_copy_goto_line(struct window_pane *wp, const char *linestr)
 
 	data->oy = lineno;
 	window_copy_update_selection(wp);
+	window_copy_redraw_screen(wp);
+}
+
+void
+window_copy_whole_line(struct window_pane *wp, const char *linestr)
+{
+	struct window_copy_mode_data	*data = wp->modedata;
+	const char			*errstr;
+	u_int				 lineno;
+	u_int max_lineno = screen_size_y(&data->screen);
+
+	lineno = strtonum(linestr, 0, max_lineno, &errstr);
+	if (errstr != NULL)
+		return;
+
+	window_copy_update_cursor(wp, 0, max_lineno - lineno);
 	window_copy_redraw_screen(wp);
 }
 
