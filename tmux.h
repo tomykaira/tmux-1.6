@@ -527,6 +527,8 @@ enum mode_key_cmd {
 	MODEKEYCOPY_STARTSELECTION,
 	MODEKEYCOPY_TOPLINE,
 	MODEKEYCOPY_UP,
+
+	MODEKEYCOPY_WHOLELINE,
 };
 
 /* Entry in the default mode key tables. */

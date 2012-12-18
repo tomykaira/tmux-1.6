@@ -128,6 +128,7 @@ const struct mode_key_cmdstr mode_key_cmdstr_copy[] = {
 	{ MODEKEYCOPY_STARTSELECTION, "begin-selection" },
 	{ MODEKEYCOPY_TOPLINE, "top-line" },
 	{ MODEKEYCOPY_UP, "cursor-up" },
+	{ MODEKEYCOPY_WHOLELINE, "copy-whole-line" },
 
 	{ 0, NULL }
 };
@@ -390,6 +391,8 @@ const struct mode_key_entry mode_key_emacs_copy[] = {
 	{ KEYC_UP | KEYC_CTRL,	0, MODEKEYCOPY_SCROLLUP },
 	{ KEYC_UP | KEYC_ESCAPE, 0, MODEKEYCOPY_HALFPAGEUP },
 	{ KEYC_UP,		0, MODEKEYCOPY_UP },
+
+	{ 'l', 0, MODEKEYCOPY_WHOLELINE },
 
 	{ 0,			-1, 0 }
 };
