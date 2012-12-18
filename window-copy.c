@@ -1155,6 +1155,10 @@ window_copy_write_line(
 	    (screen_hsize(data->backing) - data->oy) + py,
 	    screen_size_x(s) - size, 1);
 
+	xsnprintf(hdr, sizeof hdr, "%u:", screen_size_y(s) - py);
+	screen_write_cursormove(ctx, 0, py);
+	screen_write_puts(ctx, &gc, "%s", hdr);
+
 	if (py == data->cy && data->cx == screen_size_x(s)) {
 		memcpy(&gc, &grid_default_cell, sizeof gc);
 		screen_write_cursormove(ctx, screen_size_x(s) - 1, py);
@@ -1444,7 +1448,7 @@ window_copy_copy_selection_xclip(struct window_pane *wp, int idx)
 	pb->size = pbt->size;
 
 	job_run_with_writecb("xclip -selection clipboard", NULL,
-		window_copy_copy_selection_xclip_callback, NULL, 
+		window_copy_copy_selection_xclip_callback, NULL,
 		pb);
 }
 
