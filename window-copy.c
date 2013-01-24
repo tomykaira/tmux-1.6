@@ -1157,6 +1157,7 @@ window_copy_write_line(
 	colour_set_bg(&gc, options_get_number(oo, "mode-bg"));
 	gc.attr |= options_get_number(oo, "mode-attr");
 
+	size = 0;
 	last = screen_size_y(s) - 1;
 	if (py == 0) {
 		size = xsnprintf(hdr, sizeof hdr,
@@ -1183,8 +1184,8 @@ window_copy_write_line(
 	    (screen_hsize(data->backing) - data->oy) + py,
 	    screen_size_x(s) - size, 1);
 
-	xsnprintf(hdr, sizeof hdr, "%u:", screen_size_y(s) - py);
-	screen_write_cursormove(ctx, 0, py);
+	size = xsnprintf(hdr, sizeof hdr, "%u:", screen_size_y(s) - py) + size;
+	screen_write_cursormove(ctx, screen_size_x(s) - size, py);
 	screen_write_puts(ctx, &gc, "%s", hdr);
 
 	if (py == data->cy && data->cx == screen_size_x(s)) {
