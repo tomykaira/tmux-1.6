@@ -734,15 +734,23 @@ window_pane_read_callback(unused struct bufferevent *bufev, void *data)
 	struct window_pane     *wp = data;
 	char   		       *new_data;
 	size_t			new_size;
+	struct timeval		tv;
+	long			passed = 0;
 
 	new_size = EVBUFFER_LENGTH(wp->event->input) - wp->pipe_off;
+	wp->window->rush_amount += new_size;
+	if (wp->window->rush_amount > 100000) {
+		goto next;
+	}
 	if (wp->pipe_fd != -1 && new_size > 0) {
 		new_data = EVBUFFER_DATA(wp->event->input);
 		bufferevent_write(wp->pipe_event, new_data, new_size);
 	}
+	log_debug("%s: %d\n", __func__, new_size);
 
 	input_parse(wp);
 
+ next:
 	wp->pipe_off = EVBUFFER_LENGTH(wp->event->input);
 
 	/*
@@ -752,6 +760,16 @@ window_pane_read_callback(unused struct bufferevent *bufev, void *data)
 	wp->window->flags |= WINDOW_SILENCE;
 	if (gettimeofday(&wp->window->silence_timer, NULL) != 0)
 		fatal("gettimeofday failed.");
+
+	if (gettimeofday(&tv, NULL) != 0)
+		fatal("gettimeofday failed.");
+	passed = (tv.tv_sec - wp->window->rush_timer.tv_sec)*1000*1000 +
+	    tv.tv_usec - wp->window->rush_timer.tv_usec;
+	if (passed > 500*1000) {
+		wp->window->rush_amount = 0;
+	}
+	wp->window->rush_timer.tv_sec  = tv.tv_sec;
+	wp->window->rush_timer.tv_usec = tv.tv_usec;
 }
 
 /* ARGSUSED */

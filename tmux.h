@@ -866,6 +866,8 @@ struct window {
 	char		*name;
 	struct event	 name_timer;
 	struct timeval   silence_timer;
+	struct timeval   rush_timer;
+	long             rush_amount;
 
 	struct window_pane *active;
 	struct window_pane *last;
